@@ -1,20 +1,27 @@
-package test.how.monero.hodl;
+package how.monero.hodl;
+
+import static how.monero.hodl.crypto.CryptoUtil.fastHash;
+import static how.monero.hodl.crypto.CryptoUtil.getHpnGLookup;
+import static how.monero.hodl.crypto.CryptoUtil.randomMessage;
+import static how.monero.hodl.ringSignature.StringCT.KEYGEN;
+import static how.monero.hodl.ringSignature.StringCT.Output;
+import static how.monero.hodl.ringSignature.StringCT.SK;
+import static how.monero.hodl.ringSignature.StringCT.SPEND;
+import static how.monero.hodl.ringSignature.StringCT.SpendSignature;
+import static how.monero.hodl.ringSignature.StringCT.VER;
 
 import how.monero.hodl.crypto.Curve25519Point;
 import how.monero.hodl.crypto.Curve25519PointPair;
 import how.monero.hodl.crypto.Scalar;
 import how.monero.hodl.ringSignature.SpendParams;
-
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Date;
+import org.junit.jupiter.api.Test;
 
-import static how.monero.hodl.crypto.CryptoUtil.*;
-import static how.monero.hodl.ringSignature.StringCT.*;
+class StringCTSpendTest {
 
-public class StringCTSpendTest {
-
-  public static SpendParams createTestSpendParams(int decompositionBase, int decompositionExponent, int inputs) {
+  static SpendParams createTestSpendParams(int decompositionBase, int decompositionExponent, int inputs) {
 
     // ring size must be a power of the decomposition base
     int ringSize = (int) Math.pow(decompositionBase, decompositionExponent);
@@ -26,22 +33,23 @@ public class StringCTSpendTest {
 
     // The owned inputs that are going to be spent
     Output[] realInputs = new Output[inputs];
-    for(int i=0; i<inputs; i++) realInputs[i] = Output.genRandomOutput(BigInteger.valueOf((long)(Math.random()*1000+1000)));
+    for (int i = 0; i < inputs; i++)
+      realInputs[i] = Output.genRandomOutput(BigInteger.valueOf((long) (Math.random() * 1000 + 1000)));
 
     // The new outputs to be created (typically one for the recipient one for change)
     BigInteger fee = BigInteger.valueOf(0); //keep fee as zero for now, to avoid overcomplicating things
     Output[] outputs = new Output[2];
     outputs[0] = Output.genRandomOutput(realInputs[0].amount.divide(BigInteger.valueOf(2)));
-    outputs[1] = Output.genRandomOutput(BigInteger.valueOf(Arrays.stream(realInputs).mapToLong(i->i.amount.longValue()).sum()).subtract(fee).subtract(outputs[0].amount));
+    outputs[1] = Output.genRandomOutput(BigInteger.valueOf(Arrays.stream(realInputs).mapToLong(i -> i.amount.longValue()).sum()).subtract(fee).subtract(outputs[0].amount));
 
-    sp.iAsterisk = (int) Math.floor(Math.random()*ringSize); // the ring index of the sender's owned inputs
+    sp.iAsterisk = (int) Math.floor(Math.random() * ringSize); // the ring index of the sender's owned inputs
 
     // input commitments
     // commitments to the amounts of all inputs referenced in the transaction (real inputs and decoys)
     Curve25519Point[][] inputCommitments = new Curve25519Point[inputs][ringSize];
-    for(int j=0; j<inputs; j++) {
-      for(int i=0; i<ringSize; i++) {
-        if(i==sp.iAsterisk) inputCommitments[j][i] = realInputs[j].co;
+    for (int j = 0; j < inputs; j++) {
+      for (int i = 0; i < ringSize; i++) {
+        if (i == sp.iAsterisk) inputCommitments[j][i] = realInputs[j].co;
         else inputCommitments[j][i] = Curve25519Point.randomPoint();
       }
     }
@@ -49,12 +57,12 @@ public class StringCTSpendTest {
     // there is a co commitment for each ring
     // each member of co is sum(COMp(input amt i)) - sum(COMp(output amt i))
     sp.co = new Curve25519Point[ringSize];
-    for(int i=0; i<ringSize; i++) {
+    for (int i = 0; i < ringSize; i++) {
       sp.co[i] = inputCommitments[0][i];
-      for(int j=1; j<inputs; j++) {
+      for (int j = 1; j < inputs; j++) {
         sp.co[i] = sp.co[i].add(inputCommitments[j][i]);
       }
-      for(int k=0; k<outputs.length; k++) {
+      for (int k = 0; k < outputs.length; k++) {
         sp.co[i] = sp.co[i].subtract(outputs[k].co);
       }
     }
@@ -68,9 +76,9 @@ public class StringCTSpendTest {
     // the key image for every real input referenced
     sp.ki = new Curve25519Point[inputs];
 
-    for(int j=0; j<inputs; j++) {
-      for(int i=0; i<ringSize; i++) {
-        sp.pk[j][i] = (i==sp.iAsterisk) ? realInputs[j].pk : KEYGEN().pk;
+    for (int j = 0; j < inputs; j++) {
+      for (int i = 0; i < ringSize; i++) {
+        sp.pk[j][i] = (i == sp.iAsterisk) ? realInputs[j].pk : KEYGEN().pk;
       }
       sp.sk[j] = realInputs[j].sk;
       sp.ki[j] = realInputs[j].ki;
@@ -80,22 +88,22 @@ public class StringCTSpendTest {
     sp.M = fastHash(randomMessage(100));
 
     sp.s = Scalar.ZERO;
-    for(int i=0; i<realInputs.length; i++) sp.s = sp.s.add(realInputs[i].mask);
-    for(int i=0; i<outputs.length; i++) sp.s = sp.s.sub(outputs[i].mask);
+    for (int i = 0; i < realInputs.length; i++) sp.s = sp.s.add(realInputs[i].mask);
+    for (int i = 0; i < outputs.length; i++) sp.s = sp.s.sub(outputs[i].mask);
 
     Curve25519Point S = realInputs[0].co;
-    for(int i=1; i<realInputs.length; i++) S = S.add(realInputs[i].co);
+    for (int i = 1; i < realInputs.length; i++) S = S.add(realInputs[i].co);
     S = S.subtract(Curve25519Point.G.scalarMultiply(new Scalar(fee)));
-    for(int i=0; i<outputs.length; i++) S = S.subtract(outputs[i].co);
+    for (int i = 0; i < outputs.length; i++) S = S.subtract(outputs[i].co);
 
     Curve25519Point S1 = getHpnGLookup(1).scalarMultiply(sp.s);
 
-    if(!S.equals(S1)) throw new RuntimeException("S != S'");
+    if (!S.equals(S1)) throw new RuntimeException("S != S'");
 
     return sp;
   }
 
-  public static void spendTest() {
+  void spendTest() {
 
     boolean pauseAtEachStage = false;
     int testIterations = 1;
@@ -108,10 +116,19 @@ public class StringCTSpendTest {
 
     long startMs = new Date().getTime();
     SpendParams[] sp = new SpendParams[testIterations];
-    for (int i=0; i<testIterations; i++) sp[i] = createTestSpendParams(decompositionBase, decompositionExponent, inputs);
-    System.out.println("Spend params generation duration: " + (new Date().getTime()-startMs) + " ms");
+    for (int i = 0; i < testIterations; i++)
+      sp[i] = createTestSpendParams(decompositionBase, decompositionExponent, inputs);
+    System.out.println("Spend params generation duration: " + (new Date().getTime() - startMs) + " ms");
 
-    if(pauseAtEachStage) { System.out.println("Press enter to continue"); try { System.in.read(); } catch (Exception e) {}; System.out.println("Continuing..."); }
+    if (pauseAtEachStage) {
+      System.out.println("Press enter to continue");
+      try {
+        System.in.read();
+      } catch (Exception e) {
+      }
+      ;
+      System.out.println("Continuing...");
+    }
 
     Curve25519Point.scalarMults = 0;
     Curve25519Point.scalarBaseMults = 0;
@@ -119,17 +136,25 @@ public class StringCTSpendTest {
     startMs = new Date().getTime();
     // create a transaction to spend the outputs, resulting in a signature that proves the authority to send them
     SpendSignature[] spendSignature = new SpendSignature[testIterations];
-    for (int i=0; i<testIterations; i++) spendSignature[i] = SPEND(sp[i]);
+    for (int i = 0; i < testIterations; i++) spendSignature[i] = SPEND(sp[i]);
 
-    System.out.println("Spend signature generation duration: " + (new Date().getTime()-startMs) + " ms");
+    System.out.println("Spend signature generation duration: " + (new Date().getTime() - startMs) + " ms");
 
     byte[][] spendSignatureBytes = new byte[testIterations][];
-    for (int i=0; i<testIterations; i++) {
+    for (int i = 0; i < testIterations; i++) {
       spendSignatureBytes[i] = spendSignature[i].toBytes();
       System.out.println("Spend Signature length (bytes):" + spendSignatureBytes[i].length);
     }
 
-    if(pauseAtEachStage) { System.out.println("Press enter to continue"); try { System.in.read(); } catch (Exception e) {}; System.out.println("Continuing..."); }
+    if (pauseAtEachStage) {
+      System.out.println("Press enter to continue");
+      try {
+        System.in.read();
+      } catch (Exception e) {
+      }
+      ;
+      System.out.println("Continuing...");
+    }
     startMs = new Date().getTime();
 
     System.out.println("Spend ScalarMults: " + Curve25519Point.scalarMults);
@@ -141,7 +166,7 @@ public class StringCTSpendTest {
     Curve25519Point.lineRecordingSourceFile = "StringCT.java";
 
     // verify the spend transaction
-    for (int i=0; i<testIterations; i++) {
+    for (int i = 0; i < testIterations; i++) {
 
       //spendSignature[i] = SpendSignature.fromBytes(spendSignatureBytes[i]);
 
@@ -152,16 +177,19 @@ public class StringCTSpendTest {
     System.out.println("Verify ScalarMults: " + Curve25519Point.scalarMults);
     System.out.println("Verify BaseScalarMults: " + Curve25519Point.scalarBaseMults);
 
-    System.out.println("Signature verification duration: " + (new Date().getTime()-startMs) + " ms");
+    System.out.println("Signature verification duration: " + (new Date().getTime() - startMs) + " ms");
 
-    if(Curve25519Point.enableLineRecording) Curve25519Point.lineNumberCallFrequencyMap.entrySet().stream().forEach(e->{System.out.println("line: " + e.getKey() + ", calls: " + e.getValue());});
+    if (Curve25519Point.enableLineRecording)
+      Curve25519Point.lineNumberCallFrequencyMap.entrySet().stream().forEach(e -> {
+        System.out.println("line: " + e.getKey() + ", calls: " + e.getValue());
+      });
 
   }
 
-  public static void main(String[] args) {
+  @Test
+  void test() {
     long startTime = new Date().getTime();
     spendTest();
-    System.out.println("Total duration: " + (new Date().getTime()-startTime) + " ms");
+    System.out.println("Total duration: " + (new Date().getTime() - startTime) + " ms");
   }
-
 }

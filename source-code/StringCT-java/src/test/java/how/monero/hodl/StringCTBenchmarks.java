@@ -1,4 +1,4 @@
-package test.how.monero.hodl;
+package how.monero.hodl;
 
 import how.monero.hodl.crypto.Curve25519Point;
 import how.monero.hodl.ringSignature.SpendParams;
@@ -9,13 +9,14 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import org.junit.jupiter.api.Test;
 
 import static how.monero.hodl.ringSignature.StringCT.*;
-import static test.how.monero.hodl.StringCTSpendTest.createTestSpendParams;
+import static how.monero.hodl.StringCTSpendTest.createTestSpendParams;
 
-public class StringCTBenchmarks {
+class StringCTBenchmarks {
 
-  public static void spendTest() throws IOException {
+  void spendTest() throws IOException {
 
     int[] inputsVariants = new int[]{1, 2, 3, 4, 5, 10, 20};
     int[] decompositionExponentVariants = new int[]{2, 3, 4, 5, 6, 7, 8, 9, 10};
@@ -116,11 +117,10 @@ public class StringCTBenchmarks {
 
   }
 
-
-  public static void main(String[] args) throws Exception {
+  @Test
+  void test() throws Exception {
     long startTime = new Date().getTime();
     spendTest();
     System.out.println("\nTotal duration: " + (new Date().getTime()-startTime) + " ms");
   }
-
 }

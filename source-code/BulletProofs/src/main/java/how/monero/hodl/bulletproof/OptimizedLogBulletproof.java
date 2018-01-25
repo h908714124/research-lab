@@ -14,12 +14,12 @@ import static how.monero.hodl.util.ByteUtil.*;
 
 public class OptimizedLogBulletproof
 {
-    private static int N;
-    private static int logN;
-    private static Curve25519Point G;
-    private static Curve25519Point H;
-    private static Curve25519Point[] Gi;
-    private static Curve25519Point[] Hi;
+    static int N;
+    static int logN;
+    static Curve25519Point G;
+    static Curve25519Point H;
+    static Curve25519Point[] Gi;
+    static Curve25519Point[] Hi;
 
     public static class ProofTuple
     {
@@ -482,41 +482,5 @@ public class OptimizedLogBulletproof
             return false;
 
         return true;
-    }
-
-    public static void main(String[] args)
-    {
-        // Number of bits in the range
-        N = 64;
-        logN = 6; // its log, manually
-
-        // Set the curve base points
-        G = Curve25519Point.G;
-        H = Curve25519Point.hashToPoint(G);
-        Gi = new Curve25519Point[N];
-        Hi = new Curve25519Point[N];
-        for (int i = 0; i < N; i++)
-        {
-            Gi[i] = getHpnGLookup(2*i);
-            Hi[i] = getHpnGLookup(2*i+1);
-        }
-
-        // Run a bunch of randomized trials
-        Random rando = new Random();
-        int TRIALS = 250;
-        int count = 0;
-
-        while (count < TRIALS)
-        {
-            long amount = rando.nextLong();
-            if (amount > Math.pow(2,N)-1 || amount < 0)
-                continue;
-
-            ProofTuple proof = PROVE(new Scalar(BigInteger.valueOf(amount)),randomScalar());
-            if (!VERIFY(proof))
-                System.out.println("Test failed");
-
-            count += 1;
-        }
     }
 }

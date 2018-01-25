@@ -12,19 +12,18 @@ import static how.monero.hodl.crypto.Scalar.randomScalar;
 import static how.monero.hodl.crypto.CryptoUtil.*;
 import static how.monero.hodl.util.ByteUtil.*;
 
-public class MultiBulletproof
+public class LogBulletproof
 {
-    private static int N;
-    private static int logMN;
-    private static int M;
-    private static Curve25519Point G;
-    private static Curve25519Point H;
-    private static Curve25519Point[] Gi;
-    private static Curve25519Point[] Hi;
+    static int N;
+    static int logN;
+    static Curve25519Point G;
+    static Curve25519Point H;
+    static Curve25519Point[] Gi;
+    static Curve25519Point[] Hi;
 
     public static class ProofTuple
     {
-        private Curve25519Point V[];
+        private Curve25519Point V;
         private Curve25519Point A;
         private Curve25519Point S;
         private Curve25519Point T1;
@@ -37,7 +36,7 @@ public class MultiBulletproof
         private Scalar b;
         private Scalar t;
 
-        public ProofTuple(Curve25519Point V[], Curve25519Point A, Curve25519Point S, Curve25519Point T1, Curve25519Point T2, Scalar taux, Scalar mu, Curve25519Point[] L, Curve25519Point[] R, Scalar a, Scalar b, Scalar t)
+        public ProofTuple(Curve25519Point V, Curve25519Point A, Curve25519Point S, Curve25519Point T1, Curve25519Point T2, Scalar taux, Scalar mu, Curve25519Point[] L, Curve25519Point[] R, Scalar a, Scalar b, Scalar t)
         {
             this.V = V;
             this.A = A;
@@ -57,10 +56,10 @@ public class MultiBulletproof
     /* Given two scalar arrays, construct a vector commitment */
     public static Curve25519Point VectorExponent(Scalar[] a, Scalar[] b)
     {
-        assert a.length == M*N && b.length == M*N;
+        assert a.length == N && b.length == N;
 
         Curve25519Point Result = Curve25519Point.ZERO;
-        for (int i = 0; i < M*N; i++)
+        for (int i = 0; i < N; i++)
         {
             Result = Result.add(Gi[i].scalarMultiply(a[i]));
             Result = Result.add(Hi[i].scalarMultiply(b[i]));
@@ -83,10 +82,10 @@ public class MultiBulletproof
     }
 
     /* Given a scalar, construct a vector of powers */
-    public static Scalar[] VectorPowers(Scalar x, int size)
+    public static Scalar[] VectorPowers(Scalar x)
     {
-        Scalar[] result = new Scalar[size];
-        for (int i = 0; i < size; i++)
+        Scalar[] result = new Scalar[N];
+        for (int i = 0; i < N; i++)
         {
             result[i] = x.pow(i);
         }
@@ -211,42 +210,43 @@ public class MultiBulletproof
         return result;
     }
 
-    /* Construct an aggregate range proof */
-    public static ProofTuple PROVE(Scalar[] v, Scalar[] gamma)
+    /* Compute the value of k(y,z) */
+    public static Scalar ComputeK(Scalar y, Scalar z)
     {
-        Curve25519Point[] V = new Curve25519Point[M];
+        Scalar result = Scalar.ZERO;
+        result = result.sub(z.sq().mul(InnerProduct(VectorPowers(Scalar.ONE),VectorPowers(y))));
+        result = result.sub(z.pow(3).mul(InnerProduct(VectorPowers(Scalar.ONE),VectorPowers(Scalar.TWO))));
 
-        V[0] = H.scalarMultiply(v[0]).add(G.scalarMultiply(gamma[0]));
+        return result;
+    }
+
+    /* Given a value v (0..2^N-1) and a mask gamma, construct a range proof */
+    public static ProofTuple PROVE(Scalar v, Scalar gamma)
+    {
+        Curve25519Point V = H.scalarMultiply(v).add(G.scalarMultiply(gamma));
+
         // This hash is updated for Fiat-Shamir throughout the proof
-        Scalar hashCache = hashToScalar(V[0].toBytes());
-        for (int j = 1; j < M; j++)
-        {
-            V[j] = H.scalarMultiply(v[j]).add(G.scalarMultiply(gamma[j]));
-            hashCache = hashToScalar(concat(hashCache.bytes,V[j].toBytes()));
-        }
+        Scalar hashCache = hashToScalar(V.toBytes());
         
         // PAPER LINES 36-37
-        Scalar[] aL = new Scalar[M*N];
-        Scalar[] aR = new Scalar[M*N];
+        Scalar[] aL = new Scalar[N];
+        Scalar[] aR = new Scalar[N];
 
-        for (int j = 0; j < M; j++)
+        BigInteger tempV = v.toBigInteger();
+        for (int i = N-1; i >= 0; i--)
         {
-            BigInteger tempV = v[j].toBigInteger();
-            for (int i = N-1; i >= 0; i--)
+            BigInteger basePow = BigInteger.valueOf(2).pow(i);
+            if (tempV.divide(basePow).equals(BigInteger.ZERO))
             {
-                BigInteger basePow = BigInteger.valueOf(2).pow(i);
-                if (tempV.divide(basePow).equals(BigInteger.ZERO))
-                {
-                    aL[j*N+i] = Scalar.ZERO;
-                }
-                else
-                {
-                    aL[j*N+i] = Scalar.ONE;
-                    tempV = tempV.subtract(basePow);
-                }
-
-                aR[j*N+i] = aL[j*N+i].sub(Scalar.ONE);
+                aL[i] = Scalar.ZERO;
             }
+            else
+            {
+                aL[i] = Scalar.ONE;
+                tempV = tempV.subtract(basePow);
+            }
+
+            aR[i] = aL[i].sub(Scalar.ONE);
         }
 
         // PAPER LINES 38-39
@@ -254,9 +254,9 @@ public class MultiBulletproof
         Curve25519Point A = VectorExponent(aL,aR).add(G.scalarMultiply(alpha));
 
         // PAPER LINES 40-42
-        Scalar[] sL = new Scalar[M*N];
-        Scalar[] sR = new Scalar[M*N];
-        for (int i = 0; i < M*N; i++)
+        Scalar[] sL = new Scalar[N];
+        Scalar[] sR = new Scalar[N];
+        for (int i = 0; i < N; i++)
         {
             sL[i] = randomScalar();
             sR[i] = randomScalar();
@@ -271,39 +271,21 @@ public class MultiBulletproof
         hashCache = hashToScalar(hashCache.bytes);
         Scalar z = hashCache;
 
-        // Polynomial construction by coefficients
-        Scalar[] l0;
-        Scalar[] l1;
-        Scalar[] r0;
-        Scalar[] r1;
-
-        l0 = VectorSubtract(aL,VectorScalar(VectorPowers(Scalar.ONE,M*N),z));
-        l1 = sL;
-
-        // This computes the ugly sum/concatenation from PAPER LINE 65
-        Scalar[] zerosTwos = new Scalar[M*N];
-        for (int i = 0; i < M*N; i++)
-        {
-            zerosTwos[i] = Scalar.ZERO;
-            for (int j = 1; j <= M; j++) // note this starts from 1
-            {
-                Scalar temp = Scalar.ZERO;
-                if (i >= (j-1)*N && i < j*N)
-                    temp = Scalar.TWO.pow(i-(j-1)*N); // exponent ranges from 0..N-1
-                zerosTwos[i] = zerosTwos[i].add(z.pow(1+j).mul(temp));
-            }
-        }
-
-        r0 = VectorAdd(aR,VectorScalar(VectorPowers(Scalar.ONE,M*N),z));
-        r0 = Hadamard(r0,VectorPowers(y,M*N));
-        r0 = VectorAdd(r0,zerosTwos);
-        r1 = Hadamard(VectorPowers(y,M*N),sR);
-
         // Polynomial construction before PAPER LINE 46
-        Scalar t0 = InnerProduct(l0,r0);
-        Scalar t1 = InnerProduct(l0,r1).add(InnerProduct(l1,r0));
-        Scalar t2 = InnerProduct(l1,r1);
+        Scalar t0 = Scalar.ZERO;
+        Scalar t1 = Scalar.ZERO;
+        Scalar t2 = Scalar.ZERO;
         
+        t0 = t0.add(z.mul(InnerProduct(VectorPowers(Scalar.ONE),VectorPowers(y))));
+        t0 = t0.add(z.sq().mul(v));
+        Scalar k = ComputeK(y,z);
+        t0 = t0.add(k);
+
+        t1 = t1.add(InnerProduct(VectorSubtract(aL,VectorScalar(VectorPowers(Scalar.ONE),z)),Hadamard(VectorPowers(y),sR)));
+        t1 = t1.add(InnerProduct(sL,VectorAdd(Hadamard(VectorPowers(y),VectorAdd(aR,VectorScalar(VectorPowers(Scalar.ONE),z))),VectorScalar(VectorPowers(Scalar.TWO),z.sq()))));
+
+        t2 = t2.add(InnerProduct(sL,Hadamard(VectorPowers(y),sR)));
+
         // PAPER LINES 47-48
         Scalar tau1 = randomScalar();
         Scalar tau2 = randomScalar();
@@ -317,19 +299,18 @@ public class MultiBulletproof
         Scalar x = hashCache;
         
         // PAPER LINES 52-53
-        Scalar taux = tau1.mul(x);
+        Scalar taux = Scalar.ZERO;
+        taux = tau1.mul(x);
         taux = taux.add(tau2.mul(x.sq()));
-        for (int j = 1; j <= M; j++) // note this starts from 1
-        {
-            taux = taux.add(z.pow(1+j).mul(gamma[j-1]));
-        }
+        taux = taux.add(gamma.mul(z.sq()));
         Scalar mu = x.mul(rho).add(alpha);
 
         // PAPER LINES 54-57
-        Scalar[] l = l0;
-        l = VectorAdd(l,VectorScalar(l1,x));
-        Scalar[] r = r0;
-        r = VectorAdd(r,VectorScalar(r1,x));
+        Scalar[] l = new Scalar[N];
+        Scalar[] r = new Scalar[N];
+
+        l = VectorAdd(VectorSubtract(aL,VectorScalar(VectorPowers(Scalar.ONE),z)),VectorScalar(sL,x));
+        r = VectorAdd(Hadamard(VectorPowers(y),VectorAdd(aR,VectorAdd(VectorScalar(VectorPowers(Scalar.ONE),z),VectorScalar(sR,x)))),VectorScalar(VectorPowers(Scalar.TWO),z.sq()));
 
         Scalar t = InnerProduct(l,r);
 
@@ -341,22 +322,22 @@ public class MultiBulletproof
         Scalar x_ip = hashCache;
 
         // These are used in the inner product rounds
-        int nprime = M*N;
-        Curve25519Point[] Gprime = new Curve25519Point[M*N];
-        Curve25519Point[] Hprime = new Curve25519Point[M*N];
-        Scalar[] aprime = new Scalar[M*N];
-        Scalar[] bprime = new Scalar[M*N];
-        for (int i = 0; i < M*N; i++)
+        int nprime = N;
+        Curve25519Point[] Gprime = new Curve25519Point[N];
+        Curve25519Point[] Hprime = new Curve25519Point[N];
+        Scalar[] aprime = new Scalar[N];
+        Scalar[] bprime = new Scalar[N];
+        for (int i = 0; i < N; i++)
         {
             Gprime[i] = Gi[i];
             Hprime[i] = Hi[i].scalarMultiply(Invert(y).pow(i));
             aprime[i] = l[i];
             bprime[i] = r[i];
         }
-        Curve25519Point[] L = new Curve25519Point[logMN];
-        Curve25519Point[] R = new Curve25519Point[logMN];
+        Curve25519Point[] L = new Curve25519Point[logN];
+        Curve25519Point[] R = new Curve25519Point[logN];
         int round = 0; // track the index based on number of rounds
-        Scalar[] w = new Scalar[logMN]; // this is the challenge x in the inner product protocol
+        Scalar[] w = new Scalar[logN]; // this is the challenge x in the inner product protocol
 
         // PAPER LINE 13
         while (nprime > 1)
@@ -396,9 +377,7 @@ public class MultiBulletproof
     public static boolean VERIFY(ProofTuple proof)
     {
         // Reconstruct the challenges
-        Scalar hashCache = hashToScalar(proof.V[0].toBytes());
-        for (int j = 1; j < M; j++)
-            hashCache = hashToScalar(concat(hashCache.bytes,proof.V[j].toBytes()));
+        Scalar hashCache = hashToScalar(proof.V.toBytes());
         hashCache = hashToScalar(concat(hashCache.bytes,proof.A.toBytes()));
         hashCache = hashToScalar(concat(hashCache.bytes,proof.S.toBytes()));
         Scalar y = hashCache;
@@ -417,17 +396,10 @@ public class MultiBulletproof
         // PAPER LINE 61
         Curve25519Point L61Left = G.scalarMultiply(proof.taux).add(H.scalarMultiply(proof.t));
 
-        Scalar k = Scalar.ZERO.sub(z.sq().mul(InnerProduct(VectorPowers(Scalar.ONE,M*N),VectorPowers(y,M*N))));
-        for (int j = 1; j <= M; j++) // note this starts from 1
-        {
-            k = k.sub(z.pow(j+2).mul(InnerProduct(VectorPowers(Scalar.ONE,N),VectorPowers(Scalar.TWO,N))));
-        }
+        Scalar k = ComputeK(y,z);
 
-        Curve25519Point L61Right = H.scalarMultiply(k.add(z.mul(InnerProduct(VectorPowers(Scalar.ONE,M*N),VectorPowers(y,M*N)))));
-        for (int j = 0; j < M; j++)
-        {
-            L61Right = L61Right.add(proof.V[j].scalarMultiply(z.pow(j+2)));
-        }
+        Curve25519Point L61Right = H.scalarMultiply(k.add(z.mul(InnerProduct(VectorPowers(Scalar.ONE),VectorPowers(y)))));
+        L61Right = L61Right.add(proof.V.scalarMultiply(z.sq()));
         L61Right = L61Right.add(proof.T1.scalarMultiply(x));
         L61Right = L61Right.add(proof.T2.scalarMultiply(x.sq()));
 
@@ -439,15 +411,32 @@ public class MultiBulletproof
         P = P.add(proof.A);
         P = P.add(proof.S.scalarMultiply(x));
         
+        Scalar[] Gexp = new Scalar[N];
+        for (int i = 0; i < N; i++)
+            Gexp[i] = Scalar.ZERO.sub(z);
+
+        Scalar[] Hexp = new Scalar[N];
+        for (int i = 0; i < N; i++)
+        {
+            Hexp[i] = Scalar.ZERO;
+            Hexp[i] = Hexp[i].add(z.mul(y.pow(i)));
+            Hexp[i] = Hexp[i].add(z.sq().mul(Scalar.TWO.pow(i)));
+            Hexp[i] = Hexp[i].mul(Invert(y).pow(i));
+        }
+        P = P.add(VectorExponent(Gexp,Hexp));
+
+        // Compute the number of rounds for the inner product
+        int rounds = proof.L.length;
+
         // PAPER LINES 21-22
         // The inner product challenges are computed per round
-        Scalar[] w = new Scalar[logMN];
+        Scalar[] w = new Scalar[rounds];
         hashCache = hashToScalar(concat(hashCache.bytes,proof.L[0].toBytes()));
         hashCache = hashToScalar(concat(hashCache.bytes,proof.R[0].toBytes()));
         w[0] = hashCache;
-        if (logMN > 1)
+        if (rounds > 1)
         {
-            for (int i = 1; i < logMN; i++)
+            for (int i = 1; i < rounds; i++)
             {
                 hashCache = hashToScalar(concat(hashCache.bytes,proof.L[i].toBytes()));
                 hashCache = hashToScalar(concat(hashCache.bytes,proof.R[i].toBytes()));
@@ -459,14 +448,14 @@ public class MultiBulletproof
         // Compute the curvepoints from G[i] and H[i]
         Curve25519Point InnerProdG = Curve25519Point.ZERO;
         Curve25519Point InnerProdH = Curve25519Point.ZERO;
-        for (int i = 0; i < M*N; i++)
+        for (int i = 0; i < N; i++)
         {
             // Convert the index to binary IN REVERSE and construct the scalar exponent
             int index = i;
-            Scalar gScalar = proof.a;
-            Scalar hScalar = proof.b.mul(Invert(y).pow(i));
+            Scalar gScalar = Scalar.ONE;
+            Scalar hScalar = Invert(y).pow(i);
 
-            for (int j = logMN-1; j >= 0; j--)
+            for (int j = rounds-1; j >= 0; j--)
             {
                 int J = w.length - j - 1; // because this is done in reverse bit order
                 int basePow = (int) Math.pow(2,j); // assumes we don't get too big
@@ -483,9 +472,6 @@ public class MultiBulletproof
                 }
             }
 
-            gScalar = gScalar.add(z);
-            hScalar = hScalar.sub(z.mul(y.pow(i)).add(z.pow(2+i/N).mul(Scalar.TWO.pow(i%N))).mul(Invert(y).pow(i)));
-
             // Now compute the basepoint's scalar multiplication
             // Each of these could be written as a multiexp operation instead
             InnerProdG = InnerProdG.add(Gi[i].scalarMultiply(gScalar));
@@ -495,60 +481,16 @@ public class MultiBulletproof
         // PAPER LINE 26
         Curve25519Point Pprime = P.add(G.scalarMultiply(Scalar.ZERO.sub(proof.mu)));
 
-        for (int i = 0; i < logMN; i++)
+        for (int i = 0; i < rounds; i++)
         {
             Pprime = Pprime.add(proof.L[i].scalarMultiply(w[i].sq()));
             Pprime = Pprime.add(proof.R[i].scalarMultiply(Invert(w[i]).sq()));
         }
         Pprime = Pprime.add(H.scalarMultiply(proof.t.mul(x_ip)));
 
-        if (!Pprime.equals(InnerProdG.add(InnerProdH).add(H.scalarMultiply(proof.a.mul(proof.b).mul(x_ip)))))
+        if (!Pprime.equals(InnerProdG.scalarMultiply(proof.a).add(InnerProdH.scalarMultiply(proof.b)).add(H.scalarMultiply(proof.a.mul(proof.b).mul(x_ip)))))
             return false;
 
         return true;
-    }
-
-    public static void main(String[] args)
-    {
-        // Test parameters
-        N = 64; // number of bits in amount range (so amounts are 0..2^(N-1))
-        M = 4; // number of outputs (must be a power of 2)
-        logMN = 8; // must be manually set to log_2(MN)
-        int TRIALS = 25; // number of randomized trials to run
-
-        // Set the curve base points
-        G = Curve25519Point.G;
-        H = Curve25519Point.hashToPoint(G);
-        Gi = new Curve25519Point[M*N];
-        Hi = new Curve25519Point[M*N];
-        for (int i = 0; i < M*N; i++)
-        {
-            Gi[i] = getHpnGLookup(2*i);
-            Hi[i] = getHpnGLookup(2*i+1);
-        }
-
-        // Run a bunch of randomized trials
-        Random rando = new Random();
-        int count = 0;
-
-        Scalar[] amounts = new Scalar[M];
-        Scalar[] masks = new Scalar[M];
-        while (count < TRIALS)
-        {
-            for (int j = 0; j < M; j++)
-            {
-                long amount = -1L;
-                while (amount > Math.pow(2,N)-1 || amount < 0L)
-                    amount = rando.nextLong();
-                amounts[j] = new Scalar(BigInteger.valueOf(amount));
-                masks[j] = randomScalar();
-            }
-
-            ProofTuple proof = PROVE(amounts,masks);
-            if (!VERIFY(proof))
-                System.out.println("Test failed");
-
-            count += 1;
-        }
     }
 }
